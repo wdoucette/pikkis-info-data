@@ -1,0 +1,122 @@
+name: Update Pikki's Info data
+
+on:
+  schedule:
+    # Mondays at 12:00 UTC (04:00 America/Vancouver in PST, 05:00 in PDT)
+    - cron: "0 12 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-data
+  cancel-in-progress: false
+
+env:
+  # Overrides tab (first sheet). Requires the Google Sheet to be
+  # "anyone with the link can view" so this unauthenticated export works.
+  # If the sheet is still private, this workflow keeps the last
+  # data/overrides.csv snapshot and continues.
+  OVERRIDES_CSV_URL: https://docs.google.com/spreadsheets/d/16Pp0G8ZZrgu94Ko2CLktOw3gaxXaGiiyisVtIse_NLk/export?format=csv
+
+jobs:
+  update-data:
+    name: Scrape Nikki Calc, apply overrides, rebuild bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Fetch overrides CSV (do not fail if the sheet is private)
+        run: |
+          set -uo pipefail
+          mkdir -p /tmp/pikki data
+          code=$(curl -sS -L -o /tmp/pikki/overrides.csv -w "%{http_code}" "$OVERRIDES_CSV_URL" || echo "000")
+          echo "Overrides HTTP ${code}"
+          if [ "$code" -ge 200 ] && [ "$code" -lt 300 ] && head -1 /tmp/pikki/overrides.csv | grep -qi "item_id"; then
+            cp /tmp/pikki/overrides.csv /tmp/pikki/overrides.ok.csv
+            echo "Using a freshly exported Overrides sheet."
+          else
+            echo "::warning::Could not fetch OVERRIDES_CSV_URL (HTTP ${code})."
+            echo "The Google Sheet must be shared as 'anyone with the link can view'"
+            echo "for this unauthenticated CSV export to work."
+            echo "Sheet: https://docs.google.com/spreadsheets/d/16Pp0G8ZZrgu94Ko2CLktOw3gaxXaGiiyisVtIse_NLk/edit"
+            if [ -f data/overrides.csv ] && head -1 data/overrides.csv | grep -qi "item_id"; then
+              echo "Keeping the last data/overrides.csv snapshot."
+              cp data/overrides.csv /tmp/pikki/overrides.ok.csv
+            else
+              echo "No usable overrides snapshot; the bundle will be built without overrides."
+            fi
+            if [ -f /tmp/pikki/overrides.csv ]; then
+              echo "Response preview:"
+              head -c 400 /tmp/pikki/overrides.csv || true
+              echo
+            fi
+          fi
+          if [ -f /tmp/pikki/overrides.ok.csv ]; then
+            echo "OVERRIDES_FILE=/tmp/pikki/overrides.ok.csv" >> "$GITHUB_ENV"
+          else
+            echo "OVERRIDES_FILE=" >> "$GITHUB_ENV"
+          fi
+
+      - name: Scrape Nikki Calc
+        run: |
+          python scripts/scrape_lovenikki.py scrape --out ./.scrape --delay 1 --source nikkicalc
+
+      - name: Rebuild compact bundle with overrides
+        run: |
+          set -euo pipefail
+          extra=()
+          if [ -n "${OVERRIDES_FILE:-}" ]; then
+            extra+=(--overrides "$OVERRIDES_FILE")
+          fi
+          python scripts/scrape_lovenikki.py build-site --out ./.scrape --skip-fetch "${extra[@]}"
+          test -s .scrape/bundle/pikkis-info.min.json
+          mkdir -p data
+          cp .scrape/bundle/pikkis-info.min.json data/pikkis-info.min.json
+          if [ -f .scrape/bundle/overrides.csv ]; then
+            cp .scrape/bundle/overrides.csv data/overrides.csv
+          fi
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          bundle = json.loads(Path("data/pikkis-info.min.json").read_text(encoding="utf-8"))
+          meta = bundle.get("meta") or {}
+          items = bundle.get("items") or []
+          if not items:
+              raise SystemExit("bundle has no items; refusing to commit")
+          version = {
+              "nikkicalc_version": meta.get("nikkicalc_version"),
+              "nikkicalc_updated": meta.get("nikkicalc_updated"),
+              "item_count": meta.get("item_count") or len(items),
+              "generated": meta.get("generated"),
+              "bundle": "data/pikkis-info.min.json",
+              "overrides": "data/overrides.csv" if Path("data/overrides.csv").exists() else None,
+          }
+          Path("data/version.json").write_text(
+              json.dumps(version, indent=2) + "\n", encoding="utf-8"
+          )
+          print("Nikki Calc", version["nikkicalc_version"],
+                "updated", version["nikkicalc_updated"],
+                "items", version["item_count"])
+          PY
+
+      - name: Commit and push if the bundle changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/pikkis-info.min.json data/version.json data/overrides.csv
+          if git diff --cached --quiet; then
+            echo "No data changes; skipping commit."
+          else
+            echo "Data changed; committing."
+            git commit -m "Update Pikki's Info data from Nikki Calc and overrides"
+            git push
+          fi
