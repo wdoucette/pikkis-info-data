@@ -8,9 +8,10 @@ winter, 11:23 in summer).
 
 ## Operator workflow
 
-1. The **Check local Love Nikki catalogue** workflow opens BlueStacks and captures
-   the installed catalogue. It hashes selected APK/static-table contents and
-   rebuilds only when the catalogue differs from published data.
+1. The **Check local Love Nikki catalogue** workflow first boots Android if needed
+   and reads the installed resource version, before launching Love Nikki. It asks
+   the game's version service whether patches are pending. If current, it opens
+   the game and captures the installed catalogue, rebuilding only when data differs.
 2. A changed catalogue marks the check as requiring attention. Open the game,
    finish any update/download or login, then run the workflow manually with
    **update_ready** checked. This generates a candidate artifact and change report.
@@ -19,11 +20,33 @@ winter, 11:23 in summer).
    to publish. The website reads the data repo; no frontend rebuild is required
    for later catalogue updates.
 
-GitHub Actions failure email depends on the owner's GitHub notification settings.
-This pipeline does not send email or provision a mail service. An unchanged
-installed catalogue is not proof that the server has no new update: the game
-may still be waiting for a download confirmation. No public server-update feed
-has been established. This is deliberately a semi-automated first version.
+Pending patches stop capture and create a GitHub issue assigned to `wdoucette`,
+with a mention, installed/target versions and the run link. Repeated checks of the
+same target do not create another issue (the latest 100 bot-created issues are
+checked). The run also fails for attention. Open the game and confirm any resource
+download prompt; small patches can start automatically, larger ones may not.
+After downloads complete, rerun with `update_ready` checked. Close the alert issue
+after resolving it. Every completed server check supplies a summary and a 14-day
+`server-version-report` artifact. Unknown/error results stop capture rather than
+claiming the game is current. Existing reviewed-candidate publication is separate.
+
+GitHub issue/mention and Actions email delivery depends on the owner's notification
+settings. This pipeline does not provision a separate email service. The server
+result describes resource patches for Global channel 12/resource type 2; it does
+not certify login availability or absence of maintenance. A new patch can appear
+after the check, so the operator still confirms completion before building.
+
+The standard-library checker is `scripts/check_pending_update.py`. Wayne Home has
+its game-derived protocol constants in `Pikki-Runner/version-check-config.json`
+outside the repository, with `app_version`, `http_key`, and `local_key`. These were
+derived from the validated installed game, not player credentials. Do not upload
+game preferences or account files. The checker reads only `game_version` from the
+preferences in memory and sends no player token, account or device identifier.
+It pins the app version to 11.1.2; a changed APK requires revalidation. The currently
+observed service selects HTTP with application-level encoding, not authenticated
+TLS. Its response is only an update signal; the checker never fetches or executes
+patches, and rejects unexpected routing. Setup on a different runner requires
+revalidating and provisioning the local protocol configuration.
 
 Only schedule and manual-dispatch events target the local runner, only on main.
 Do not add pull_request or pull_request_target jobs to this runner. GitHub

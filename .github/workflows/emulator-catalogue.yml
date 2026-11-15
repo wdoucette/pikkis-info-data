@@ -32,6 +32,9 @@ jobs:
     if: github.repository == 'wdoucette/pikkis-info-data' && github.ref == 'refs/heads/main' && inputs.publish_snapshot == ''
     runs-on: [self-hosted, Windows, X64, pikki-bluestacks]
     timeout-minutes: 25
+    permissions:
+      contents: read
+      issues: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -48,6 +51,36 @@ jobs:
         run: python -m pip install -r scripts/emulator/requirements.txt
       - name: Test parser and stable IDs
         run: python -m unittest discover -s tests -v
+      - name: Check server for pending in-app updates
+        id: server
+        run: python -X utf8 scripts/check_pending_update.py
+      - name: Save server version report
+        if: always() && steps.server.outputs.status != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-version-report
+          path: .emulator/server-version-status.json
+          retention-days: 14
+      - name: Notify Wayne about pending game update
+        if: steps.server.outputs.status == 'pending'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INSTALLED: ${{ steps.server.outputs.installed_resource_version }}
+          TARGET: ${{ steps.server.outputs.target_resource_version }}
+        run: |
+          $headers = @{Authorization="Bearer $env:GH_TOKEN"; Accept='application/vnd.github+json'}
+          $uri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/issues"
+          $title = "Love Nikki update required: $env:TARGET"
+          $existing = Invoke-RestMethod -Uri "$uri`?state=all&creator=github-actions%5Bbot%5D&per_page=100" -Headers $headers
+          if (!($existing | Where-Object { $_.title -eq $title })) {
+            $body = @{title=$title; assignees=@('wdoucette'); body="@wdoucette Love Nikki has pending in-app patches: **$env:INSTALLED -> $env:TARGET**. Open the game on Wayne Home and complete any download confirmation. Small updates may download automatically; larger updates can need confirmation. After completion, run the catalogue workflow with **update_ready** checked and **publish_snapshot** blank. No catalogue was published by this run.`n`n[Run summary and logs](https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID)"} | ConvertTo-Json
+            Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -Body $body -ContentType 'application/json' | Out-Null
+          }
+      - name: Stop until game update or check failure is resolved
+        if: steps.server.outputs.status != 'current'
+        run: |
+          Write-Output '::error::Game update required or update status unknown. Read the server version report. Catalogue capture and publication are blocked.'
+          exit 1
       - name: Open game and capture installed catalogue
         id: check
         shell: powershell
