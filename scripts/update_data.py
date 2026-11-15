@@ -114,6 +114,9 @@ def write_version(bundle_path: Path) -> dict:
 
 
 def main(argv: list[str] | None = None) -> None:
+    existing = DATA / "pikkis-info.min.json"
+    if existing.is_file() and json.loads(existing.read_text(encoding="utf-8")).get("meta", {}).get("source") == "local-emulator":
+        raise SystemExit("Local emulator source is active; refusing to replace stable IDs with Nikki Calc offsets.")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--overrides", default=None, help="Overrides CSV path or URL")
     parser.add_argument("--skip-fetch", action="store_true", help="Reuse files already in .scrape/")
