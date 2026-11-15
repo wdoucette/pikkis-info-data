@@ -1,9 +1,6 @@
-name: Update Pikki's Info data
+name: Legacy Nikki Calc updater (disabled by default)
 
 on:
-  schedule:
-    # Mondays at 12:00 UTC (04:00 America/Vancouver in PST, 05:00 in PDT)
-    - cron: "0 12 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -22,6 +19,7 @@ env:
 
 jobs:
   update-data:
+    if: vars.ENABLE_LEGACY_NIKKICALC == 'true'
     name: Scrape Nikki Calc, apply overrides, rebuild bundle
     runs-on: ubuntu-latest
     timeout-minutes: 30
