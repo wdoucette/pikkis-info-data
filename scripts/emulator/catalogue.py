@@ -81,8 +81,44 @@ def build(t, registry, baseline, overrides=None, minimum_items=30000):
             required_recursive_custom=1+sum(q*times_custom[k] for k,q in custom.items()))
     if overrides:load_and_apply_overrides(rows,str(overrides),None,delay=0)
     bundle=compact_bundle(rows,{'primary_source':'local-emulator'})
+    suit_links=collections.defaultdict(list);suits=[]
+    for aid,ach in t.get('gdAchievementDetailData',{}).items():
+        members=list(ach.get('clothes',{}).values())
+        if ach.get('type')!=1 or not members or ach.get('isDelete') or ach.get('no_display') or any(g not in visible for g in members):continue
+        suit=dict(id=aid,name=ach['name'],items=[ids[g] for g in members])
+        reward_gids=[g for g,a in t.get('gdSuitAchievementRewardsComplex',{}).items() if a==aid and g in visible]
+        if reward_gids:suit['reward_items']=[ids[g] for g in reward_gids]
+        variants=[]
+        for variant in t.get('gdSuitConvertData',{}).get(aid,{}).values():
+            parts=list(variant.get('clothes',{}).values())
+            if parts and all(g in visible for g in parts):variants.append(dict(id=variant['id'],items=[ids[g] for g in parts]))
+        if variants:suit['variants']=variants
+        suits.append(suit)
+        for gid in members+reward_gids:suit_links[gid].append(aid)
+    bundle['suits']=suits
     for row in bundle['items']:
-        row['game_id']=game_for_site[row['id']]
+        gid=game_for_site[row['id']];row['game_id']=gid
+        row['description']=visible[gid]['desc']
+        if suit_links[gid]:row['suit_ids']=sorted(set(suit_links[gid]))
+        recipe=t['gdClothesMergeData'].get(gid)
+        if recipe:
+            row['recipe_available']=recipe.get('no_display',0)==0
+            if not row['recipe_available']:
+                row['pending_recipe']=[dict(game_id=v['cloth'],id=ids.get(v['cloth']),q=v['num']) for v in recipe['clothes'].values()]
+            else:
+                cost=t.get('gdClothesRareData',{}).get(visible[gid]['rare'],{}).get('merge_cost')
+                if cost is not None:row['craft_gold']=cost
+        for dye in row.get('d',[]):
+            target=game_for_site[dye['id']];conversion=t['gdClothesConvertData'][target]
+            material=t.get('gdItemData',{}).get(conversion['item'],{})
+            dye.update(dye_game_id=conversion['item'],dye_name=material.get('name'),dye_quantity=conversion['num'],material_quantity=conversion['price'])
+        shop=t.get('gdClothesShopData',{}).get(gid)
+        if shop and not shop.get('no_display'):
+            goods=t.get('gdCostToGoods',{}).get(shop['price_type'])
+            currency=t.get('gdGoodsTypeProperty',{}).get(goods,{}).get('name')
+            row['shop']=dict(price=shop['price'],currency=currency or f"Currency code {shop['price_type']}",
+                currency_code=shop['price_type'],unlock_task_id=shop.get('unlock_taskid',0),
+                event_goods=bool(shop.get('is_activity_goods')),availability='configured; check current in-game availability')
         # Editorial changes cannot make a game-forbidden item decomposable.
         if t['gdClothesResolveData'].get(row['game_id'],{}).get('resolve')!=1:row['cannot_decompose']=True
     before={r['id']:r for r in baseline['items']}
@@ -93,5 +129,9 @@ def build(t, registry, baseline, overrides=None, minimum_items=30000):
             if old.get(key)!=row.get(key):changes[key]+=1
     report=dict(items=len(rows),hidden_items=len(all_items)-len(visible),new_items=len(set(rows)-old_ids),
         future_dependency_edges=future_edges,recipe_items=sum(bool(r['recipe']) for r in rows.values()),
-        cannot_decompose=sum(bool(r.get('cannot_decompose')) for r in bundle['items']),changed_fields=dict(changes))
+        cannot_decompose=sum(bool(r.get('cannot_decompose')) for r in bundle['items']),changed_fields=dict(changes),
+        suits=len(suits),items_with_suits=sum(bool(r.get('suit_ids')) for r in bundle['items']),
+        shop_entries=sum('shop' in r for r in bundle['items']),descriptions=len(rows),
+        dye_cost_links=sum(len(r.get('d',[])) for r in bundle['items']),
+        unavailable_recipes=sum(r.get('recipe_available') is False for r in bundle['items']))
     return bundle,report

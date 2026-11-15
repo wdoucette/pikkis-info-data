@@ -51,5 +51,19 @@ class CatalogueTests(unittest.TestCase):
     def test_disappearing_published_item_blocks(self):
         t,m,b=self.fixture();b['items'].append({'id':123})
         with self.assertRaises(ValueError):build(t,m,b,minimum_items=2)
+    def test_planning_details(self):
+        t,m,b=self.fixture()
+        t['gdClothesData_100'][10001]['cvt_base']=10001;t['gdClothesData_100'][10002]['cvt_base']=10001
+        t['gdClothesConvertData']={10001:{'display_name':'Pink','item':2003,'num':1,'price':3},10002:{'display_name':'Gold','item':2003,'num':2,'price':4}}
+        t['gdItemData']={2003:{'name':'Sunny Orange'}};t['gdClothesRareData']={2:{'merge_cost':1200}}
+        t['gdClothesShopData']={10002:{'price':50,'price_type':0,'unlock_taskid':10}}
+        t['gdCostToGoods']={0:3};t['gdGoodsTypeProperty']={3:{'name':'Gold'}}
+        t['gdAchievementDetailData']={9:{'type':1,'name':'Test Suit','clothes':{1:10001,2:10002}}}
+        out,_=build(t,m,b,minimum_items=2)
+        self.assertEqual(out['suits'],[{'id':9,'name':'Test Suit','items':[-1,1]}])
+        self.assertEqual(out['items'][0]['d'][0]['dye_quantity'],2)
+        self.assertEqual(out['items'][0]['d'][0]['material_quantity'],4)
+        self.assertEqual(out['items'][1]['craft_gold'],1200)
+        self.assertEqual(out['items'][1]['shop']['currency'],'Gold')
 
 if __name__=='__main__':unittest.main()

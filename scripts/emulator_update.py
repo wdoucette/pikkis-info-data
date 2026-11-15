@@ -12,10 +12,13 @@ from pathlib import Path, PurePosixPath
 ROOT=Path(__file__).resolve().parent.parent
 STATE=ROOT/'.emulator'
 PACKAGE='com.elex.nikkigp'
+CATALOGUE_SCHEMA=2
 ADB=Path(r'C:\Program Files\BlueStacks_nxt\HD-Adb.exe')
 PLAYER=Path(r'C:\Program Files\BlueStacks_nxt\HD-Player.exe')
 STATIC=('clothes_data.lua','clothes_merge_data.lua','clothes_evolution_data.lua',
-        'clothes_convert_data.lua','clothes_resolve_data.lua','clothes_genre_data.lua')
+        'clothes_convert_data.lua','clothes_resolve_data.lua','clothes_genre_data.lua',
+        'clothes_rare_data.lua','item_data.lua','clothes_shop_data.lua',
+        'achievement_detail_data.lua','suit_convert_data.lua')
 
 def digest(data):return hashlib.sha256(data).hexdigest()
 def read_json(path):return json.loads(Path(path).read_text('utf-8'))
@@ -74,8 +77,8 @@ class Device:
         if previous.is_file():
             cached=Path(read_json(previous)['snapshot'])
             if cached.is_dir() and cached.is_relative_to(STATE/'snapshots'):
-                saved=verify_snapshot(cached)
-                if saved.get('device_hash')==before:return cached,saved
+                saved=read_json(cached/'manifest.json')
+                if saved.get('device_hash')==before:return cached,verify_snapshot(cached)
         dest=STATE/'snapshots'/datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
         (dest/'tables').mkdir(parents=True)
         for path in apks:
@@ -116,11 +119,18 @@ def verify_snapshot(snapshot):
     if actual['files']!=manifest['files'] or actual['catalogue_hash']!=manifest['catalogue_hash']:raise ValueError('Snapshot integrity mismatch')
     return manifest
 
+def staged_overrides(folder):
+    import update_data
+    folder=Path(folder);folder.mkdir(parents=True,exist_ok=True)
+    previous=update_data.DATA;update_data.DATA=folder
+    if (ROOT/'data/overrides.csv').exists():shutil.copyfile(ROOT/'data/overrides.csv',folder/'overrides.csv')
+    try:return update_data.resolve_overrides(None)
+    finally:update_data.DATA=previous
+
 def build_candidate(snapshot,ready,overrides=None):
     if not ready:raise ValueError('Finish the game update first, then pass --ready. Stable files alone do not prove update completion.')
     from emulator.decoder import Decoder
     from emulator.catalogue import load_tables,build
-    from update_data import resolve_overrides
     snapshot=Path(snapshot).resolve();manifest=verify_snapshot(snapshot)
     decoder=Decoder(snapshot/'libnnchanneleu.so');decoded=snapshot/'decoded'
     for name in manifest['files']:
@@ -131,23 +141,18 @@ def build_candidate(snapshot,ready,overrides=None):
     baseline=read_json(baseline_path);registry=read_json(map_path)
     # Keep override refresh inside the candidate, not the tracked data directory.
     if overrides is None:
-        import update_data
-        old_data=update_data.DATA;update_data.DATA=snapshot/'override-cache'
-        update_data.DATA.mkdir(exist_ok=True)
-        if (ROOT/'data/overrides.csv').exists():shutil.copyfile(ROOT/'data/overrides.csv',update_data.DATA/'overrides.csv')
-        try:ov=resolve_overrides(None)
-        finally:update_data.DATA=old_data
+        ov=staged_overrides(snapshot/'override-cache')
     else:ov=Path(overrides)
     bundle,report=build(load_tables(decoded),registry,baseline,ov)
     meta=bundle['meta'];meta.pop('nikkicalc_version',None);meta.pop('nikkicalc_updated',None)
-    meta.update(source='local-emulator',catalogue_hash=manifest['catalogue_hash'],game_data_captured=manifest['captured'],
+    meta.update(source='local-emulator',catalogue_schema=CATALOGUE_SCHEMA,catalogue_hash=manifest['catalogue_hash'],game_data_captured=manifest['captured'],
         decoder_library_sha256=manifest['files']['libnnchanneleu.so'],
         credit="Item data extracted from the local Love Nikki Global installation. Game content belongs to Elex/Papergames. Editorial overrides by Pikki's Info. Legacy site IDs retained for wardrobe compatibility.",
         counts='rd: direct recipe/evolution consumption; rdc: includes recolours; rr/rrc: existing recursive planning convention. fut: hidden or unavailable dependencies exist. These totals are not a personalised safe-to-decompose verdict.',
         overrides={'source':'Overrides CSV','sha256':digest(ov.read_bytes())} if ov else None)
     out=snapshot/'candidate';out.mkdir(exist_ok=True)
     # Content comparisons exclude acquisition timestamps. Identical content produces no tracked diff.
-    semantic=lambda b:dict(items=b['items'],meta={k:v for k,v in b['meta'].items() if k not in ('generated','game_data_captured')})
+    semantic=lambda b:dict(items=b['items'],suits=b.get('suits',[]),meta={k:v for k,v in b['meta'].items() if k not in ('generated','game_data_captured')})
     if semantic(bundle)==semantic(baseline):bundle=baseline
     write_json(out/'pikkis-info.min.json',bundle)
     # Compact production file to preserve current site's small download.
@@ -193,8 +198,13 @@ def main():
             device=Device(args.adb,args.serial)
             if args.launch:device.launch()
             snapshot,manifest=device.capture();baseline=read_json(ROOT/'data/pikkis-info.min.json')
-            changed=baseline.get('meta',{}).get('catalogue_hash')!=manifest['catalogue_hash']
+            meta=baseline.get('meta',{})
+            ov=staged_overrides(STATE/'override-cache')
+            overrides_changed=(meta.get('overrides') or {}).get('sha256')!=(digest(ov.read_bytes()) if ov else None)
+            game_changed=meta.get('catalogue_hash')!=manifest['catalogue_hash']
+            changed=game_changed or overrides_changed or meta.get('catalogue_schema')!=CATALOGUE_SCHEMA
             status=dict(changed=changed,snapshot=str(snapshot),catalogue_hash=manifest['catalogue_hash'],
+                game_changed=game_changed,overrides_changed=overrides_changed,
                 message='Check game update completion, then build with --ready.' if changed else 'Installed catalogue is unchanged; no rebuild.')
             write_json(STATE/'status.json',status);print(json.dumps(status,indent=2))
             if changed:raise SystemExit(10)

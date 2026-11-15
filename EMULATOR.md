@@ -88,6 +88,24 @@ New game items receive locally allocated IDs. Never regenerate the map from
 Nikki Calc's ordering. Future third-party wardrobe imports must map by native
 game ID, not assume their offsets equal Pikki IDs.
 
+## Wardrobe and planning fields
+
+The compact bundle includes descriptions and native `game_id` values, current
+recipe quantities and gold fees, reverse crafting/evolution links, recolour dye
+names/quantities and Material costs, unavailable recipes separately from active
+recipes, and configured shop prices/currencies/unlock IDs. The top-level `suits`
+table contains base completion parts, separately identified reward pieces, and
+known recolour variants. Item `suit_ids` link to those records. Only suits whose
+base pieces are all visible are included. Shop listings are not an assertion
+that a time-limited item is on sale now. Stage drops and event acquisition
+details are not yet decoded into player-facing sources.
+
+The website's item page can show these details and calculate suit progress from
+owned items. Existing status logic is retained; the wording clarifies that
+“Extra clothes” does not certify safety for recolours or future dependencies.
+Changes to the Overrides sheet also trigger a candidate even when game files
+are unchanged.
+
 The original Nikki Calc schedule is removed. Its manual workflow is disabled
 unless `ENABLE_LEGACY_NIKKICALC=true` is deliberately set as a repository variable.
 The old CLI updater refuses to overwrite a local-emulator bundle. Reverting to
