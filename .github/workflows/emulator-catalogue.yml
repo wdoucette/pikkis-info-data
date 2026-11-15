@@ -18,6 +18,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: powershell
+
 concurrency:
   group: local-emulator-catalogue
   cancel-in-progress: false
@@ -35,26 +39,26 @@ jobs:
           persist-credentials: false
           clean: false # retain local .emulator snapshots between runs
       - name: Use runner's local Python
-        shell: pwsh
+        shell: powershell
         run: |
           $pythonDir = Join-Path $env:USERPROFILE 'Documents/Codex/Pikki-Runner/Python312'
           if (!(Test-Path (Join-Path $pythonDir 'python.exe'))) { throw 'Install the runner Python described in EMULATOR.md first.' }
-          $pythonDir >> $env:GITHUB_PATH
+          $pythonDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       - name: Install decoder dependencies
         run: python -m pip install -r scripts/emulator/requirements.txt
       - name: Test parser and stable IDs
         run: python -m unittest discover -s tests -v
       - name: Open game and capture installed catalogue
         id: check
-        shell: pwsh
+        shell: powershell
         run: |
           python -X utf8 scripts/emulator_update.py check --launch
           $checkExit = $LASTEXITCODE
           if ($checkExit -notin 0, 10) { exit $checkExit }
           $status = Get-Content .emulator/status.json -Raw | ConvertFrom-Json
-          "changed=$($status.changed.ToString().ToLower())" >> $env:GITHUB_OUTPUT
-          "snapshot=$($status.snapshot)" >> $env:GITHUB_OUTPUT
-          "## Local catalogue check`n$($status.message)`nCatalogue hash: $($status.catalogue_hash)" >> $env:GITHUB_STEP_SUMMARY
+          "changed=$($status.changed.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "snapshot=$($status.snapshot)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "## Local catalogue check`n$($status.message)`nCatalogue hash: $($status.catalogue_hash)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
           exit 0
       - name: Build candidate after game update confirmation
         if: inputs.update_ready && steps.check.outputs.changed == 'true'
@@ -87,16 +91,16 @@ jobs:
           ref: main
           clean: false
       - name: Use runner's local Python
-        shell: pwsh
+        shell: powershell
         run: |
           $pythonDir = Join-Path $env:USERPROFILE 'Documents/Codex/Pikki-Runner/Python312'
           if (!(Test-Path (Join-Path $pythonDir 'python.exe'))) { throw 'Install the runner Python described in EMULATOR.md first.' }
-          $pythonDir >> $env:GITHUB_PATH
+          $pythonDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       - name: Stage reviewed candidate and open a pull request
         env:
           SNAPSHOT_ID: ${{ inputs.publish_snapshot }}
           GH_TOKEN: ${{ github.token }}
-        shell: pwsh
+        shell: powershell
         run: |
           if ($env:SNAPSHOT_ID -notmatch '^\d{8}T\d{12}Z$') { throw 'Invalid snapshot ID' }
           $candidate = Join-Path '.emulator/snapshots' "$env:SNAPSHOT_ID/candidate"
@@ -115,4 +119,4 @@ jobs:
           $report = Get-Content "$candidate/report.json" -Raw | ConvertFrom-Json
           $body = @{title='Update catalogue from local Love Nikki installation'; head=$branch; base='main'; body="Extracted locally after the operator confirmed the game update was complete. Preserves stable wardrobe IDs and applies editorial overrides.`n`nItems: $($report.items); new: $($report.new_items). Catalogue hash: $($report.snapshot_hash). See the prior candidate artifact for the field-level change report."} | ConvertTo-Json
           $pr = Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/pulls" -Headers @{Authorization="Bearer $env:GH_TOKEN"; Accept='application/vnd.github+json'} -Body $body -ContentType 'application/json'
-          "Review and merge: $($pr.html_url)" >> $env:GITHUB_STEP_SUMMARY
+          "Review and merge: $($pr.html_url)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
