@@ -34,9 +34,12 @@ jobs:
           ref: main
           persist-credentials: false
           clean: false # retain local .emulator snapshots between runs
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+      - name: Use runner's local Python
+        shell: pwsh
+        run: |
+          $pythonDir = Join-Path $env:USERPROFILE 'Documents/Codex/Pikki-Runner/Python312'
+          if (!(Test-Path (Join-Path $pythonDir 'python.exe'))) { throw 'Install the runner Python described in EMULATOR.md first.' }
+          $pythonDir >> $env:GITHUB_PATH
       - name: Install decoder dependencies
         run: python -m pip install -r scripts/emulator/requirements.txt
       - name: Test parser and stable IDs
@@ -83,9 +86,12 @@ jobs:
         with:
           ref: main
           clean: false
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+      - name: Use runner's local Python
+        shell: pwsh
+        run: |
+          $pythonDir = Join-Path $env:USERPROFILE 'Documents/Codex/Pikki-Runner/Python312'
+          if (!(Test-Path (Join-Path $pythonDir 'python.exe'))) { throw 'Install the runner Python described in EMULATOR.md first.' }
+          $pythonDir >> $env:GITHUB_PATH
       - name: Stage reviewed candidate and open a pull request
         env:
           SNAPSHOT_ID: ${{ inputs.publish_snapshot }}

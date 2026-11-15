@@ -115,3 +115,8 @@ Runner installation on this machine: `C:\Users\wayne\Documents\Codex\Pikki-Runne
 Windows task: **Pikki GitHub Runner**, at user sign-in. To stop it, stop that task
 and its runner process; disable the task to prevent the next sign-in start.
 The GitHub runner label is `pikki-bluestacks`.
+
+The workflow uses the runner's per-user Python 3.12 at 
+C:\Users\wayne\Documents\Codex\Pikki-Runner\Python312. Install official Python
+with InstallAllUsers=0 and Include_launcher=0 at that location; the workflow
+does not request a system-wide Python installation or administrator access.
